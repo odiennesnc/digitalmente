@@ -26,6 +26,15 @@ function isAdmin() {
  * @return void
  */
 function redirect($location) {
+    // Registriamo il reindirizzamento per debug
+    error_log("Reindirizzamento a: $location");
+    
+    // Aggiungiamo header anti-cache per evitare problemi con la cache del browser
+    header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+    header("Cache-Control: post-check=0, pre-check=0", false);
+    header("Pragma: no-cache");
+    
+    // Reindirizzamento
     header("Location: $location");
     exit;
 }
@@ -123,5 +132,75 @@ function getUserRoleName($role) {
         default:
             return 'Sconosciuto';
     }
+}
+
+/**
+ * Get base URL for assets
+ * @return string
+ */
+function getBaseUrl() {
+    // Get the current script path
+    $path = $_SERVER['PHP_SELF'];
+    $parts = explode('/', $path);
+    
+    // Find the 'app' directory in the path
+    $appIndex = array_search('app', $parts);
+    
+    if ($appIndex === false) {
+        // Fallback if 'app' is not found in the path
+        return '/';
+    }
+    
+    // Calculate how many directories we need to go back to reach app root
+    $depth = count($parts) - $appIndex - 2; // -2 to account for 'app/' itself and the filename
+    if ($depth < 0) $depth = 0;
+    
+    // Generate the relative path back to the app root
+    $basePath = '';
+    for ($i = 0; $i < $depth; $i++) {
+        $basePath .= '../';
+    }
+    
+    // Ensure the path always ends with a slash for consistency
+    if ($basePath !== '' && substr($basePath, -1) !== '/') {
+        $basePath .= '/';
+    }
+    
+    // Log debug information
+    error_log("URL Debug - Path: $path, Parts: " . json_encode($parts) . ", AppIndex: $appIndex, Depth: $depth, BasePath: $basePath");
+    
+    return $basePath;
+}
+
+/**
+ * Formatta una data per l'inserimento nel database
+ * Se la data è vuota, restituisce NULL
+ * Se la data è in formato valido, restituisce la data in formato Y-m-d
+ * @param string $date La data da formattare
+ * @return string|null La data formattata o NULL
+ */
+function formatDateForDB($date) {
+    if(empty($date)) {
+        return null;
+    }
+    
+    // Verifica se la data è in formato valido
+    $dateObj = DateTime::createFromFormat('Y-m-d', $date);
+    if($dateObj && $dateObj->format('Y-m-d') === $date) {
+        return $date;
+    }
+    
+    // Prova altri formati comuni
+    $formats = ['d/m/Y', 'd-m-Y', 'm/d/Y', 'Y/m/d'];
+    foreach($formats as $format) {
+        $dateObj = DateTime::createFromFormat($format, $date);
+        if($dateObj) {
+            return $dateObj->format('Y-m-d');
+        }
+    }
+    
+    // Se arriva qui, la data non è in un formato riconosciuto
+    error_log("Data non valida: $date");
+    return null;
 }
 ?>

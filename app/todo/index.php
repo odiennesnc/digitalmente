@@ -26,9 +26,28 @@ $result = $stmt->get_result();
     Todo
 </h2>
 
-<!-- Display message if present -->
+<!-- Display message if present with auto-hide feature -->
 <?php if (!empty($message)): ?>
-    <?php echo $message; ?>
+    <div id="notification-message">
+        <?php echo $message; ?>
+    </div>
+    <script>
+        // Nascondi il messaggio dopo 5 secondi
+        setTimeout(function() {
+            const notification = document.getElementById('notification-message');
+            if (notification) {
+                notification.style.opacity = '1';
+                let fadeEffect = setInterval(function() {
+                    if (notification.style.opacity > 0) {
+                        notification.style.opacity -= 0.1;
+                    } else {
+                        clearInterval(fadeEffect);
+                        notification.style.display = 'none';
+                    }
+                }, 100);
+            }
+        }, 5000);
+    </script>
 <?php endif; ?>
 
 <!-- Add new task button -->
@@ -99,7 +118,7 @@ $result = $stmt->get_result();
                                             <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"></path>
                                         </svg>
                                     </a>
-                                    <button @click="openDeleteModal(<?php echo $row['id']; ?>)" class="flex items-center justify-between px-2 py-2 text-sm font-medium leading-5 text-purple-600 rounded-lg dark:text-gray-400 focus:outline-none focus:shadow-outline-gray" aria-label="Delete">
+                                    <button type="button" onclick="window.openDeleteModal(<?php echo $row['id']; ?>)" data-id="<?php echo $row['id']; ?>" class="flex items-center justify-between px-2 py-2 text-sm font-medium leading-5 text-purple-600 rounded-lg dark:text-gray-400 focus:outline-none focus:shadow-outline-gray" aria-label="Delete">
                                         <svg class="w-5 h-5" aria-hidden="true" fill="currentColor" viewBox="0 0 20 20">
                                             <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"></path>
                                         </svg>
@@ -118,9 +137,10 @@ $result = $stmt->get_result();
     </div>
 </div>
 
-<!-- Delete confirmation modal -->
-<div x-show="isDeleteModalOpen" x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0" class="fixed inset-0 z-30 flex items-end bg-black bg-opacity-50 sm:items-center sm:justify-center">
-    <div x-show="isDeleteModalOpen" x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 transform translate-y-1/2" x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0  transform translate-y-1/2" @click.away="closeDeleteModal" @keydown.escape="closeDeleteModal" class="w-full px-6 py-4 overflow-hidden bg-white rounded-t-lg dark:bg-gray-800 sm:rounded-lg sm:m-4 sm:max-w-xl">
+<!-- Delete confirmation modal - Implementazione ridisegnata -->
+<div x-data="deleteModalHandler()" x-cloak>
+    <div x-show="isOpen" x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0" class="fixed inset-0 z-30 flex items-end bg-black bg-opacity-50 sm:items-center sm:justify-center">
+        <div x-show="isOpen" x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 transform translate-y-1/2" x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0  transform translate-y-1/2" @click.away="close()" @keydown.escape="close()" class="w-full px-6 py-4 overflow-hidden bg-white rounded-t-lg dark:bg-gray-800 sm:rounded-lg sm:m-4 sm:max-w-xl">
         <header class="flex justify-between">
             <h2 class="text-lg font-medium text-gray-700 dark:text-gray-300">
                 Conferma eliminazione
@@ -132,11 +152,11 @@ $result = $stmt->get_result();
             </p>
         </div>
         <footer class="flex flex-col items-center justify-end px-6 py-3 -mx-6 -mb-4 space-y-4 sm:space-y-0 sm:space-x-6 sm:flex-row bg-gray-50 dark:bg-gray-800">
-            <button @click="closeDeleteModal" class="w-full px-5 py-3 text-sm font-medium leading-5 text-gray-700 transition-colors duration-150 border border-gray-300 rounded-lg dark:text-gray-400 sm:px-4 sm:py-2 sm:w-auto active:bg-transparent hover:border-gray-500 focus:border-gray-500 active:text-gray-500 focus:outline-none focus:shadow-outline-gray">
+            <button @click="close()" class="w-full px-5 py-3 text-sm font-medium leading-5 text-gray-700 transition-colors duration-150 border border-gray-300 rounded-lg dark:text-gray-400 sm:px-4 sm:py-2 sm:w-auto active:bg-transparent hover:border-gray-500 focus:border-gray-500 active:text-gray-500 focus:outline-none focus:shadow-outline-gray">
                 Annulla
             </button>
             <form id="deleteForm" method="post" action="elimina.php">
-                <input type="hidden" name="id" id="deleteId" value="">
+                <input type="hidden" name="id" id="deleteId" x-model="taskId">
                 <button type="submit" class="w-full px-5 py-3 text-sm font-medium leading-5 text-white transition-colors duration-150 bg-red-600 border border-transparent rounded-lg sm:w-auto sm:px-4 sm:py-2 active:bg-red-600 hover:bg-red-700 focus:outline-none focus:shadow-outline-red">
                     Elimina
                 </button>
@@ -146,6 +166,40 @@ $result = $stmt->get_result();
 </div>
 
 <script>
+    // Define the Alpine component for delete modal
+    function deleteModalHandler() {
+        return {
+            isOpen: false,
+            taskId: null,
+            
+            open(id) {
+                console.log('Apertura modal per task ID:', id);
+                this.isOpen = true;
+                this.taskId = id;
+            },
+            
+            close() {
+                console.log('Chiusura modal');
+                this.isOpen = false;
+            }
+        };
+    }
+
+    // Make the function globally available
+    window.deleteModalHandler = deleteModalHandler;
+    
+    // Function to open the delete modal from anywhere in the page
+    function openDeleteModal(id) {
+        console.log('Chiamata funzione globale openDeleteModal con ID:', id);
+        // Try to find the Alpine.js component and call its method
+        const modalComponent = document.querySelector('[x-data="deleteModalHandler()"]').__x.$data;
+        if (modalComponent) {
+            modalComponent.open(id);
+        } else {
+            console.error('Componente modale non trovato');
+        }
+    }
+    
     // Initialize DataTables
     $(document).ready(function() {
         $('#todoTable').DataTable({
@@ -157,21 +211,23 @@ $result = $stmt->get_result();
                 { "orderable": false, "targets": 4 }
             ]
         });
+        
+        console.log('DataTables inizializzato');
+        
+        // Hook up delete buttons manually as a fallback
+        document.querySelectorAll('button[aria-label="Delete"]').forEach(button => {
+            button.addEventListener('click', function() {
+                const id = this.getAttribute('data-id');
+                if (id) {
+                    console.log('Click listener manuale attivato per ID:', id);
+                    openDeleteModal(id);
+                }
+            });
+        });
     });
     
-    // Add to Alpine.js data
-    document.addEventListener('alpine:init', () => {
-        Alpine.data('data', () => ({
-            isDeleteModalOpen: false,
-            openDeleteModal(id) {
-                this.isDeleteModalOpen = true;
-                document.getElementById('deleteId').value = id;
-            },
-            closeDeleteModal() {
-                this.isDeleteModalOpen = false;
-            }
-        }));
-    });
+    // Add this to the global window object
+    window.openDeleteModal = openDeleteModal;
 </script>
 
 <?php require_once '../includes/footer.php'; ?>

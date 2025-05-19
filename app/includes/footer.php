@@ -3,41 +3,8 @@
         </div>
     </div>
     <script>
-        function data() {
-            return {
-                isSideMenuOpen: false,
-                isTopicsMenuOpen: false,
-                isDocumentsMenuOpen: false,
-                isUsersMenuOpen: false,
-                isProfileMenuOpen: false,
-                dark: false,
-                
-                toggleSideMenu() {
-                    this.isSideMenuOpen = !this.isSideMenuOpen;
-                },
-                closeSideMenu() {
-                    this.isSideMenuOpen = false;
-                },
-                toggleTopicsMenu() {
-                    this.isTopicsMenuOpen = !this.isTopicsMenuOpen;
-                },
-                toggleDocumentsMenu() {
-                    this.isDocumentsMenuOpen = !this.isDocumentsMenuOpen;
-                },
-                toggleUsersMenu() {
-                    this.isUsersMenuOpen = !this.isUsersMenuOpen;
-                },
-                toggleProfileMenu() {
-                    this.isProfileMenuOpen = !this.isProfileMenuOpen;
-                },
-                closeProfileMenu() {
-                    this.isProfileMenuOpen = false;
-                },
-                toggleTheme() {
-                    this.dark = !this.dark;
-                }
-            };
-        }
+        // Alpine.js data function is now loaded from alpine-data.js
+        // No need to redefine it here
 
         $(document).ready(function() {
             if ($('.datatable').length) {

@@ -41,10 +41,10 @@ CREATE TABLE IF NOT EXISTS `utenti` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `nominativo` varchar(250) DEFAULT NULL,
   `password` varchar(255) DEFAULT NULL,
-  `email` varchar(255) DEFAULT NULL,
+  `email` varchar(191) DEFAULT NULL,
   `ruolo` int(11) DEFAULT NULL COMMENT '1=admin, 2=editor',
   `last_login` date DEFAULT NULL,
-  `created_at` date DEFAULT CURRENT_TIMESTAMP,
+  `created_at` date DEFAULT NULL,
   `reset_id` varchar(250) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `email` (`email`)

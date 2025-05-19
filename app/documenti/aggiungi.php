@@ -22,9 +22,29 @@ $argomenti = $stmt->get_result();
 
 // Process form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Log incoming form data for debugging
+    error_log("Form POST data: " . json_encode($_POST));
+    
+    // Check if required fields are present
+    if (!isset($_POST['titolo']) || !isset($_POST['tipologia_doc'])) {
+        $message = "Campi obbligatori mancanti";
+        $messageType = 'error';
+        goto display_form;
+    }
+    
     // Common fields for all document types
     $titolo = cleanData($_POST['titolo']);
-    $argomenti_id = isset($_POST['argomenti_id']) ? (int)$_POST['argomenti_id'] : null;
+    // Per evitare problemi con bind_param, usiamo 0 invece di null
+    // poi convertiamo 0 in NULL con NULLIF nella query SQL
+    $argomenti_id = isset($_POST['argomenti_id']) && !empty($_POST['argomenti_id']) ? (int)$_POST['argomenti_id'] : 0;
+    
+    // Ensure tipologia_doc is valid
+    if (!isset($_POST['tipologia_doc']) || !in_array((int)$_POST['tipologia_doc'], [1, 2, 3])) {
+        $message = "Tipologia documento non valida";
+        $messageType = 'error';
+        goto display_form;
+    }
+    
     $tipologia_doc = (int)$_POST['tipologia_doc'];
     
     // Check title
@@ -47,27 +67,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         // If no error with file upload or no file uploaded, proceed with database insertion
         if ($messageType !== 'error') {
-            // Common fields for all types
-            $stmt = $conn->prepare("INSERT INTO documenti (argomenti_id, titolo, tipologia_doc, foto, 
-                                autore, collana, traduzione, editore, anno_pubblicazione, pagine, indice, bibliografia,
-                                mese, numero, sommario, regia, montaggio, argomento_trattato) 
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            
-            // Initialize fields with null values
-            $autore = null;
-            $collana = null;
-            $traduzione = null;
-            $editore = null;
-            $anno_pubblicazione = null;
-            $pagine = null;
-            $indice = null;
-            $bibliografia = null;
-            $mese = null;
-            $numero = null;
-            $sommario = null;
-            $regia = null;
-            $montaggio = null;
-            $argomento_trattato = null;
+            // Approccio semplificato per gestire l'inserimento
+            // Inizializza i campi - Empty strings per i campi stringa
+            $autore = '';
+            $collana = '';
+            $traduzione = '';
+            $editore = '';
+            $anno_pubblicazione = '';
+            $pagine = '';
+            $indice = '';
+            $bibliografia = '';
+            $mese = '';
+            $numero = '';
+            $sommario = '';
+            $regia = '';
+            $montaggio = '';
+            $argomento_trattato = '';
             
             // Set values based on document type
             switch ($tipologia_doc) {
@@ -99,23 +114,112 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     break;
             }
             
-            $stmt->bind_param("isiisssssssssssss",
-                $argomenti_id, $titolo, $tipologia_doc, $foto,
-                $autore, $collana, $traduzione, $editore, $anno_pubblicazione, $pagine, $indice, $bibliografia,
-                $mese, $numero, $sommario, $regia, $montaggio, $argomento_trattato);
-            
-            if ($stmt->execute()) {
-                $message = "Documento aggiunto con successo";
-                $messageType = 'success';
+            // Debug log prima dell'inserimento
+            error_log("Debug - Preparazione inserimento documento - Tipo: $tipologia_doc, Argomento ID: $argomenti_id");
+
+            if ($argomenti_id == 0) {
+                // Versione senza argomenti_id (NULL diretto)
+                $sql = "INSERT INTO documenti (titolo, tipologia_doc, foto, 
+                        autore, collana, traduzione, editore, anno_pubblicazione, pagine, indice, bibliografia,
+                        mese, numero, sommario, regia, montaggio, argomento_trattato) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
                 
-                // Clear form fields by redirecting
-                header("Refresh: 1; URL=aggiungi.php");
+                $stmt = $conn->prepare($sql);
+                
+                if ($stmt) {
+                    // 's' per titolo, 'i' per tipologia_doc, seguiti da 's' per tutti gli altri campi stringa
+                    $stmt->bind_param("sisssssssssssssss", 
+                        $titolo, $tipologia_doc, $foto,
+                        $autore, $collana, $traduzione, $editore, $anno_pubblicazione, $pagine, $indice, $bibliografia,
+                        $mese, $numero, $sommario, $regia, $montaggio, $argomento_trattato);
+                }
             } else {
-                $message = "Errore durante l'aggiunta del documento: " . $stmt->error;
+                // Versione con argomenti_id
+                $sql = "INSERT INTO documenti (argomenti_id, titolo, tipologia_doc, foto, 
+                        autore, collana, traduzione, editore, anno_pubblicazione, pagine, indice, bibliografia,
+                        mese, numero, sommario, regia, montaggio, argomento_trattato) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                
+                $stmt = $conn->prepare($sql);
+                
+                if ($stmt) {
+                    $stmt->bind_param("isisssssssssssssss",
+                        $argomenti_id, $titolo, $tipologia_doc, $foto,
+                        $autore, $collana, $traduzione, $editore, $anno_pubblicazione, $pagine, $indice, $bibliografia,
+                        $mese, $numero, $sommario, $regia, $montaggio, $argomento_trattato);
+                }
+            }
+            // Check if statement preparation was successful
+            if (!$stmt) {
+                error_log("Errore nella preparazione della query: " . $conn->error);
+                $message = "Errore durante l'aggiunta del documento: errore nella preparazione della query";
+                $messageType = 'error';
+                // Don't proceed further
+                goto display_form;
+            }
+            
+            // Assicuriamoci che tutti i valori siano del tipo corretto
+            $tipologia_doc = (int)$tipologia_doc;
+            $argomenti_id = (int)$argomenti_id;
+            
+            // Converti tutti i valori stringa in stringhe effettive (non null)
+            $titolo = (string)$titolo;
+            $foto = (string)$foto;
+            $autore = (string)$autore;
+            $collana = (string)$collana;
+            $traduzione = (string)$traduzione;
+            $editore = (string)$editore;
+            $anno_pubblicazione = (string)$anno_pubblicazione;
+            $pagine = (string)$pagine;
+            $indice = (string)$indice;
+            $bibliografia = (string)$bibliografia;
+            $mese = (string)$mese;
+            $numero = (string)$numero;
+            $sommario = (string)$sommario;
+            $regia = (string)$regia;
+            $montaggio = (string)$montaggio;
+            $argomento_trattato = (string)$argomento_trattato;
+            
+            // Log completo dei dati per debug
+            error_log("Debug - Binding parametri con tipi corretti: " . 
+                     "Tipo doc: $tipologia_doc, ArgID: $argomenti_id, Titolo: $titolo");
+            
+            // Debug output
+            error_log("Debug - Form data received: " . json_encode($_POST));
+            error_log("Debug - Document type: " . $tipologia_doc);
+            error_log("Debug - Binding parameters: argomenti_id=" . var_export($argomenti_id, true) . 
+                      ", titolo=" . $titolo . ", tipologia_doc=" . $tipologia_doc .
+                      ", foto=" . $foto);
+            
+            try {
+                // Try to execute the statement
+                if (!$stmt->execute()) {
+                    // Log dettagliato dell'errore
+                    error_log("Errore nell'esecuzione della query: " . $stmt->error);
+                    error_log("Stato dei parametri: " . json_encode([
+                        'argomenti_id' => $argomenti_id,
+                        'titolo' => $titolo,
+                        'tipologia_doc' => $tipologia_doc
+                    ]));
+                    
+                    $message = "Errore durante l'aggiunta del documento: " . $stmt->error;
+                    $messageType = 'error';
+                } else {
+                    $message = "Documento aggiunto con successo";
+                    $messageType = 'success';
+                    
+                    // Clear form fields by redirecting
+                    header("Refresh: 1; URL=aggiungi.php");
+                }
+            } catch (Exception $e) {
+                error_log("Exception durante l'esecuzione della query: " . $e->getMessage());
+                $message = "Errore durante l'aggiunta del documento: " . $e->getMessage();
                 $messageType = 'error';
             }
         }
     }
+    // Label for goto statement
+    display_form:
 }
 
 include '../includes/header.php';

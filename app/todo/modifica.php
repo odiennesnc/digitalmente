@@ -74,23 +74,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['action'])) {
         $error = displayError('Il campo task è obbligatorio');
     } else {
         $taskText = cleanData($_POST['task']);
-        $data_scadenza = !empty($_POST['data_scadenza']) ? $_POST['data_scadenza'] : null;
+        $data_scadenza = formatDateForDB($_POST['data_scadenza'] ?? '');
         $completato = isset($_POST['completato']) ? 1 : 0;
+        
+        // Log per debug
+        error_log("Modifica TODO - ID: $id, Task: '$taskText', Data scadenza: " . ($data_scadenza ?? 'NULL') . ", Completato: $completato, Utente: $userId");
         
         // Prepare statement for update
         $stmt = $conn->prepare("UPDATE todo SET task = ?, data_scadenza = ?, completato = ? WHERE id = ? AND utente_id = ?");
-        $stmt->bind_param("ssiii", $taskText, $data_scadenza, $completato, $id, $userId);
+        
+        // Se data_scadenza è null, gestiamo diversamente il binding
+        if ($data_scadenza === null) {
+            $null = null;
+            $stmt->bind_param("ssiii", $taskText, $null, $completato, $id, $userId);
+        } else {
+            $stmt->bind_param("ssiii", $taskText, $data_scadenza, $completato, $id, $userId);
+        }
         
         // Execute statement
         if ($stmt->execute()) {
             // Set success message and redirect
             $_SESSION['message'] = displaySuccess('Task aggiornato con successo');
-            redirect('index.php');
+            
+            // Chiudiamo lo statement prima del redirect
+            $stmt->close();
+            
+            // Facciamo il redirect con output buffer flush per evitare problemi
+            ob_end_clean(); // Pulisce qualsiasi output precedente
+            redirect('./index.php'); // Percorso relativo rispetto alla directory corrente
         } else {
             $error = displayError('Errore nell\'aggiornamento del task: ' . $conn->error);
+            $stmt->close();
         }
-        
-        $stmt->close();
     }
 }
 ?>
@@ -137,7 +152,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['action'])) {
                 type="date" 
                 name="data_scadenza" 
                 id="data_scadenza" 
-                value="<?php echo htmlspecialchars($task['data_scadenza']); ?>"
+                value="<?php echo !empty($task['data_scadenza']) ? htmlspecialchars($task['data_scadenza']) : ''; ?>"
             >
         </div>
 

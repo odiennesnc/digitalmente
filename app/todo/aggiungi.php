@@ -19,20 +19,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = displayError('Il campo task è obbligatorio');
     } else {
         $task = cleanData($_POST['task']);
-        $data_scadenza = !empty($_POST['data_scadenza']) ? $_POST['data_scadenza'] : null;
+        $data_scadenza = formatDateForDB($_POST['data_scadenza'] ?? '');
         $utente_id = $_SESSION['user_id'];
+        
+        // Log per debug
+        error_log("Inserimento TODO - Task: '$task', Data scadenza: " . ($data_scadenza ?? 'NULL') . ", Utente: $utente_id");
         
         // Prepare statement for insertion
         $stmt = $conn->prepare("INSERT INTO todo (utente_id, task, data_scadenza) VALUES (?, ?, ?)");
-        $stmt->bind_param("iss", $utente_id, $task, $data_scadenza);
+        
+        // Se data_scadenza è null, usiamo bind_param diverso
+        if ($data_scadenza === null) {
+            $stmt->bind_param("iss", $utente_id, $task, $null);
+            $null = null;
+        } else {
+            $stmt->bind_param("iss", $utente_id, $task, $data_scadenza);
+        }
         
         // Execute statement
         if ($stmt->execute()) {
             // Set success message and redirect
             $_SESSION['message'] = displaySuccess('Task aggiunto con successo');
-            redirect('index.php');
+            
+            // Chiudiamo lo statement e lo statement va chiuso prima del redirect
+            $stmt->close();
+            
+            // Facciamo il redirect con output buffer flush per evitare problemi
+            ob_end_clean(); // Pulisce qualsiasi output precedente
+            redirect('./index.php'); // Percorso relativo rispetto alla directory corrente
         } else {
             $error = displayError('Errore nell\'aggiunta del task: ' . $conn->error);
+            $stmt->close();
         }
         
         $stmt->close();
