@@ -1,0 +1,597 @@
+<?php
+/**
+ * Document Manager - Gestore centralizzato delle funzioni per documenti
+ * 
+ * Questo file importa e centralizza tutte le funzioni relative ai documenti
+ * per evitare dichiarazioni duplicate e conflitti tra file.
+ * 
+ * Data: 20 maggio 2025
+ */
+
+// Verifica per evitare includimenti multipli
+if (!defined('DOCUMENT_MANAGER_LOADED')) {
+    define('DOCUMENT_MANAGER_LOADED', true);
+
+    /**
+     * Ottiene il nome della tipologia di documento
+     * 
+     * @param int $type_id ID della tipologia
+     * @return string Nome della tipologia
+     */
+    function getDocumentTypeName($type_id) {
+        $types = [
+            1 => 'Libro',
+            2 => 'Rivista',
+            3 => 'Video'
+        ];
+        
+        return isset($types[$type_id]) ? $types[$type_id] : 'Sconosciuto';
+    }
+    
+    /**
+     * Ottiene tutte le tipologie di documento
+     * 
+     * @return array Array associativo con le tipologie
+     */
+    function getDocumentTypes() {
+        return [
+            1 => 'Libro',
+            2 => 'Rivista',
+            3 => 'Video'
+        ];
+    }
+
+    /**
+     * Carica un documento dal database in base all'ID
+     * @param mysqli $conn Connessione al database
+     * @param int $id ID del documento
+     * @return array|false Array associativo con i dati del documento o false in caso di errore
+     */
+    function getDocumentById($conn, $id) {
+        try {
+            $stmt = $conn->prepare("SELECT d.*, a.argomento 
+                                   FROM documenti d 
+                                   LEFT JOIN argomenti a ON d.argomenti_id = a.id 
+                                   WHERE d.id = ?");
+            if (!$stmt) {
+                error_log("Errore nella preparazione query: " . $conn->error);
+                return false;
+            }
+            
+            $stmt->bind_param("i", $id);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            
+            if ($result->num_rows === 0) {
+                return false;
+            }
+            
+            return $result->fetch_assoc();
+        } catch (Exception $e) {
+            error_log("Errore nel caricamento del documento: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Elimina un documento e la relativa immagine
+     * @param mysqli $conn Connessione al database
+     * @param int $id ID del documento da eliminare
+     * @return bool
+     */
+    function deleteDocument($conn, $id) {
+        try {
+            // Recupera il nome dell'immagine prima di eliminare il record
+            $stmt = $conn->prepare("SELECT foto FROM documenti WHERE id = ?");
+            if (!$stmt) {
+                throw new Exception("Errore nella preparazione query: " . $conn->error);
+            }
+            
+            $stmt->bind_param("i", $id);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $doc = $result->fetch_assoc();
+            
+            // Elimina il record nel database
+            $stmt = $conn->prepare("DELETE FROM documenti WHERE id = ?");
+            if (!$stmt) {
+                throw new Exception("Errore nella preparazione query di eliminazione: " . $conn->error);
+            }
+            
+            $stmt->bind_param("i", $id);
+            if (!$stmt->execute()) {
+                throw new Exception("Errore nell'eliminazione del documento: " . $stmt->error);
+            }
+            
+            // Se c'era un'immagine, eliminala dal filesystem
+            if (!empty($doc['foto'])) {
+                $image_path = '../uploads/documents/' . $doc['foto'];
+                if (file_exists($image_path)) {
+                    @unlink($image_path);
+                }
+            }
+            
+            return true;
+        } catch (Exception $e) {
+            error_log("Errore nell'eliminazione del documento: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Gestisce l'upload di un'immagine per un documento
+     * @param array $file Array $_FILES['nome_campo']
+     * @param string $old_file Nome del file precedente (per la sostituzione)
+     * @return string|false Nome del file caricato o false in caso di errore
+     */
+    function handleDocumentImageUpload($file, $old_file = null) {
+        try {
+            // Verifica che ci sia un file caricato
+            if (!isset($file) || $file['error'] != UPLOAD_ERR_OK) {
+                // Se non c'è un nuovo file, mantieni il vecchio
+                if ($file['error'] == UPLOAD_ERR_NO_FILE && $old_file) {
+                    return $old_file;
+                }
+                return false;
+            }
+            
+            $upload_dir = '../uploads/documents/';
+            
+            // Verifica directory di upload
+            if (!is_dir($upload_dir)) {
+                if (!mkdir($upload_dir, 0755, true)) {
+                    throw new Exception("Impossibile creare la directory di upload");
+                }
+            }
+            
+            if (!is_writable($upload_dir)) {
+                throw new Exception("La directory di upload non è scrivibile");
+            }
+            
+            // Validazione del file
+            $allowed_types = ['image/jpeg', 'image/png', 'image/gif', 'image/jpg'];
+            $file_type = $file['type'];
+            
+            if (!in_array($file_type, $allowed_types)) {
+                throw new Exception("Formato file non supportato. Sono ammessi solo JPG, JPEG, PNG e GIF.");
+            }
+            
+            // Generazione nome file sicuro
+            $file_name = basename($file['name']);
+            $file_ext = strtolower(pathinfo($file_name, PATHINFO_EXTENSION));
+            $new_file_name = uniqid('doc_') . '.' . $file_ext;
+            $destination = $upload_dir . $new_file_name;
+            
+            // Upload del file
+            if (move_uploaded_file($file['tmp_name'], $destination)) {
+                // Se c'era un vecchio file, eliminalo
+                if ($old_file && file_exists($upload_dir . $old_file)) {
+                    @unlink($upload_dir . $old_file);
+                }
+                return $new_file_name;
+            } else {
+                throw new Exception("Errore durante il caricamento del file");
+            }
+        } catch (Exception $e) {
+            error_log("Errore nell'upload dell'immagine: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Valida i campi per un documento
+     * @param array $data Array associativo con i dati del documento
+     * @return array Array con chiave 'valid' (bool) e 'message' (string)
+     */
+    function validateDocumentData($data) {
+        $errors = [];
+        
+        // Campi obbligatori comuni
+        if (empty($data['titolo'])) {
+            $errors[] = "Il titolo è obbligatorio";
+        }
+        
+        if (!isset($data['tipologia_doc']) || !in_array((int)$data['tipologia_doc'], [1, 2, 3])) {
+            $errors[] = "La tipologia documento non è valida";
+        }
+        
+        // Validazione in base alla tipologia
+        switch ((int)$data['tipologia_doc']) {
+            case 1: // Libro
+                // Log per debug della validazione libro
+                error_log("Validazione libro: autore=" . (isset($data['autore']) ? $data['autore'] : 'vuoto') . 
+                          ", editore=" . (isset($data['editore']) ? $data['editore'] : 'vuoto') . 
+                          ", anno_pubblicazione=" . (isset($data['anno_pubblicazione']) ? $data['anno_pubblicazione'] : 'vuoto'));
+                
+                // Verifica che i campi non siano null prima di passarli al binding
+                if (!isset($data['autore'])) $data['autore'] = '';
+                if (!isset($data['editore'])) $data['editore'] = '';
+                if (!isset($data['anno_pubblicazione'])) $data['anno_pubblicazione'] = '';
+                break;
+                
+            case 2: // Rivista
+                // Log per debug della validazione rivista
+                error_log("Validazione rivista: editore=" . (isset($data['editore']) ? $data['editore'] : 'vuoto') . 
+                          ", anno_pubblicazione=" . (isset($data['anno_pubblicazione']) ? $data['anno_pubblicazione'] : 'vuoto'));
+                
+                // Verifica che i campi non siano null prima di passarli al binding
+                if (!isset($data['editore'])) $data['editore'] = '';
+                if (!isset($data['anno_pubblicazione'])) $data['anno_pubblicazione'] = '';
+                break;
+                
+            case 3: // Video
+                // Log per debug della validazione video
+                error_log("Validazione video: autore=" . (isset($data['autore']) ? $data['autore'] : 'vuoto') . 
+                          ", anno_pubblicazione=" . (isset($data['anno_pubblicazione']) ? $data['anno_pubblicazione'] : 'vuoto'));
+                
+                // Verifica che i campi non siano null prima di passarli al binding
+                if (!isset($data['autore'])) $data['autore'] = '';
+                if (!isset($data['anno_pubblicazione'])) $data['anno_pubblicazione'] = '';
+                break;
+        }
+        
+        if (!empty($errors)) {
+            return [
+                'valid' => false,
+                'message' => "Errori di validazione:<br>" . implode("<br>", $errors)
+            ];
+        }
+        
+        return [
+            'valid' => true,
+            'message' => ''
+        ];
+    }
+
+    /**
+     * Inserisce un nuovo documento nel database
+     * @param mysqli $conn Connessione al database
+     * @param array $data Dati del documento da inserire
+     * @return bool|int ID del documento inserito o false in caso di errore
+     */
+    function insertDocument($conn, $data) {
+        try {
+            // Validazione dati
+            $validation = validateDocumentData($data);
+            if (!$validation['valid']) {
+                error_log("Errore di validazione: " . $validation['message']);
+                return false;
+            }
+            
+            // Costruiamo la query dinamicamente in base alla tipologia documento
+            $fields = [
+                'tipologia_doc', 
+                'titolo', 
+                'argomenti_id', 
+                'foto', 
+                'anno_pubblicazione', 
+                'data_inserimento'
+            ];
+            
+            $values = [
+                isset($data['tipologia_doc']) ? (int)$data['tipologia_doc'] : 0,
+                isset($data['titolo']) ? $data['titolo'] : '',
+                isset($data['argomenti_id']) ? $data['argomenti_id'] : null,
+                isset($data['foto']) ? $data['foto'] : null,
+                isset($data['anno_pubblicazione']) ? $data['anno_pubblicazione'] : null,
+                date('Y-m-d H:i:s')
+            ];
+            
+            $types = 'issss';
+            
+            // Aggiungi campi specifici in base alla tipologia
+            switch ((int)$data['tipologia_doc']) {
+                case 1: // Libro
+                    // Campi specifici per i libri
+                    $fields = array_merge($fields, [
+                        'autore', 'editore', 'collana', 'traduzione', 
+                        'pagine', 'indice', 'bibliografia'
+                    ]);
+                    
+                    $values = array_merge($values, [
+                        isset($data['autore']) ? $data['autore'] : null,
+                        isset($data['editore']) ? $data['editore'] : null,
+                        isset($data['collana']) ? $data['collana'] : null,
+                        isset($data['traduzione']) ? $data['traduzione'] : null,
+                        isset($data['pagine']) ? $data['pagine'] : null,
+                        isset($data['indice']) ? $data['indice'] : null,
+                        isset($data['bibliografia']) ? $data['bibliografia'] : null
+                    ]);
+                    
+                    $types .= 'sssssss';
+                    break;
+                    
+                case 2: // Rivista
+                    // Campi specifici per le riviste
+                    $fields = array_merge($fields, [
+                        'editore', 'mese', 'numero', 'sommario'
+                    ]);
+                    
+                    $values = array_merge($values, [
+                        isset($data['editore']) ? $data['editore'] : null,
+                        isset($data['mese']) ? $data['mese'] : null,
+                        isset($data['numero']) ? $data['numero'] : null,
+                        isset($data['sommario']) ? $data['sommario'] : null
+                    ]);
+                    
+                    $types .= 'ssss';
+                    break;
+                    
+                case 3: // Video
+                    // Campi specifici per i video
+                    $fields = array_merge($fields, [
+                        'autore', 'regia', 'montaggio', 'argomento_trattato'
+                    ]);
+                    
+                    $values = array_merge($values, [
+                        isset($data['autore']) ? $data['autore'] : null,
+                        isset($data['regia']) ? $data['regia'] : null,
+                        isset($data['montaggio']) ? $data['montaggio'] : null,
+                        isset($data['argomento_trattato']) ? $data['argomento_trattato'] : null
+                    ]);
+                    
+                    $types .= 'ssss';
+                    break;
+            }
+            
+            // Costruisci la query
+            $fields_str = implode(', ', $fields);
+            $placeholders = str_repeat('?, ', count($values) - 1) . '?';
+            
+            $query = "INSERT INTO documenti ({$fields_str}) VALUES ({$placeholders})";
+            
+            $stmt = $conn->prepare($query);
+            if (!$stmt) {
+                throw new Exception("Errore nella preparazione query: " . $conn->error);
+            }
+            
+            // Bindare i parametri dinamicamente
+            $bind_params = array($types);
+            
+            foreach ($values as $key => $value) {
+                $bind_params[] = &$values[$key];
+            }
+            
+            call_user_func_array(array($stmt, 'bind_param'), $bind_params);
+            
+            if (!$stmt->execute()) {
+                throw new Exception("Errore nell'esecuzione della query: " . $stmt->error);
+            }
+            
+            $inserted_id = $stmt->insert_id;
+            $stmt->close();
+            
+            return $inserted_id;
+            
+        } catch (Exception $e) {
+            error_log("Errore nell'inserimento del documento: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Aggiorna un documento esistente nel database
+     * @param mysqli $conn Connessione al database
+     * @param array $data Dati del documento da aggiornare
+     * @return bool True se l'aggiornamento ha avuto successo, False altrimenti
+     */
+    function updateDocument($conn, $data) {
+        try {
+            if (!isset($data['id']) || empty($data['id'])) {
+                throw new Exception("ID documento non specificato");
+            }
+            
+            $document_id = (int)$data['id'];
+            
+            // Validazione dati
+            $validation = validateDocumentData($data);
+            if (!$validation['valid']) {
+                error_log("Errore di validazione: " . $validation['message']);
+                return false;
+            }
+            
+            // Campi base comuni a tutti i documenti che richiedono parametri
+            $param_fields = [
+                'tipologia_doc = ?',
+                'titolo = ?',
+                'argomenti_id = ?',
+                'anno_pubblicazione = ?'
+            ];
+            
+            // Valori per i parametri base
+            $param_values = [
+                isset($data['tipologia_doc']) ? (int)$data['tipologia_doc'] : 0,
+                isset($data['titolo']) ? $data['titolo'] : '',
+                isset($data['argomenti_id']) ? $data['argomenti_id'] : null,
+                isset($data['anno_pubblicazione']) ? $data['anno_pubblicazione'] : null
+            ];
+            
+            // Tipi per i parametri base
+            $param_types = 'isss';
+            
+            // Array per i campi con valori diretti (no parametri)
+            $direct_fields = [];
+            
+            // Gestione immagine
+            if (isset($data['foto']) && !empty($data['foto'])) {
+                $param_fields[] = 'foto = ?';
+                $param_values[] = $data['foto'];
+                $param_types .= 's';
+            }
+            
+            // Aggiungi campi specifici in base alla tipologia
+            switch ((int)$data['tipologia_doc']) {
+                case 1: // Libro
+                    // Reset campi non pertinenti (campi diretti senza parametri)
+                    $direct_fields = array_merge($direct_fields, [
+                        'mese = NULL',
+                        'numero = NULL',
+                        'sommario = NULL',
+                        'regia = NULL',
+                        'montaggio = NULL',
+                        'argomento_trattato = NULL'
+                    ]);
+                    
+                    // Campi specifici per i libri che usano parametri
+                    $param_fields = array_merge($param_fields, [
+                        'autore = ?',
+                        'editore = ?',
+                        'collana = ?',
+                        'traduzione = ?',
+                        'pagine = ?',
+                        'indice = ?',
+                        'bibliografia = ?'
+                    ]);
+                    
+                    // Valori per i parametri
+                    $param_values = array_merge($param_values, [
+                        isset($data['autore']) ? $data['autore'] : null,
+                        isset($data['editore']) ? $data['editore'] : null,
+                        isset($data['collana']) ? $data['collana'] : null,
+                        isset($data['traduzione']) ? $data['traduzione'] : null,
+                        isset($data['pagine']) ? $data['pagine'] : null,
+                        isset($data['indice']) ? $data['indice'] : null,
+                        isset($data['bibliografia']) ? $data['bibliografia'] : null
+                    ]);
+                    
+                    // Tipi per i parametri
+                    $param_types .= 'sssssss';
+                    break;
+                    
+                case 2: // Rivista
+                    // Reset campi non pertinenti (campi diretti senza parametri)
+                    $direct_fields = array_merge($direct_fields, [
+                        'autore = NULL',
+                        'collana = NULL',
+                        'traduzione = NULL',
+                        'pagine = NULL',
+                        'indice = NULL',
+                        'bibliografia = NULL',
+                        'regia = NULL',
+                        'montaggio = NULL',
+                        'argomento_trattato = NULL'
+                    ]);
+                    
+                    // Campi specifici per le riviste che usano parametri
+                    $param_fields = array_merge($param_fields, [
+                        'editore = ?',
+                        'mese = ?',
+                        'numero = ?',
+                        'sommario = ?'
+                    ]);
+                    
+                    // Valori per i parametri
+                    $param_values = array_merge($param_values, [
+                        isset($data['editore']) ? $data['editore'] : null,
+                        isset($data['mese']) ? $data['mese'] : null,
+                        isset($data['numero']) ? $data['numero'] : null,
+                        isset($data['sommario']) ? $data['sommario'] : null
+                    ]);
+                    
+                    // Tipi per i parametri
+                    $param_types .= 'ssss';
+                    break;
+                    
+                case 3: // Video
+                    // Reset campi non pertinenti (campi diretti senza parametri)
+                    $direct_fields = array_merge($direct_fields, [
+                        'editore = NULL',
+                        'collana = NULL',
+                        'traduzione = NULL',
+                        'pagine = NULL',
+                        'indice = NULL',
+                        'bibliografia = NULL',
+                        'mese = NULL',
+                        'numero = NULL',
+                        'sommario = NULL'
+                    ]);
+                    
+                    // Campi specifici per i video che usano parametri
+                    $param_fields = array_merge($param_fields, [
+                        'autore = ?',
+                        'regia = ?',
+                        'montaggio = ?',
+                        'argomento_trattato = ?'
+                    ]);
+                    
+                    // Valori per i parametri
+                    $param_values = array_merge($param_values, [
+                        isset($data['autore']) ? $data['autore'] : null,
+                        isset($data['regia']) ? $data['regia'] : null,
+                        isset($data['montaggio']) ? $data['montaggio'] : null,
+                        isset($data['argomento_trattato']) ? $data['argomento_trattato'] : null
+                    ]);
+                    
+                    // Tipi per i parametri
+                    $param_types .= 'ssss';
+                    break;
+            }
+            
+            // Unisci i campi parametrizzati e quelli diretti
+            $all_fields_str = implode(', ', array_merge($param_fields, $direct_fields));
+            
+            $query = "UPDATE documenti SET {$all_fields_str} WHERE id = ?";
+            
+            // Aggiungi l'ID alla fine dei parametri
+            $param_values[] = $document_id;
+            $param_types .= 'i';
+            
+            // Debug - visualizza info query e parametri
+            error_log("DEBUG updateDocument - Query: " . $query);
+            error_log("DEBUG updateDocument - Numero di parametri: " . count($param_values));
+            error_log("DEBUG updateDocument - Lunghezza stringa tipi: " . strlen($param_types));
+            
+            // Verifica che il numero di tipi corrisponda al numero di parametri
+            if (strlen($param_types) !== count($param_values)) {
+                error_log("ERRORE updateDocument - Il numero di tipi (" . strlen($param_types) . 
+                          ") non corrisponde al numero di valori (" . count($param_values) . ")");
+                
+                // In caso di errore, rigenera la stringa dei tipi
+                $param_types = str_repeat('s', count($param_values) - 1) . 'i'; // tutti stringhe tranne l'ultimo (ID) che è intero
+                error_log("DEBUG updateDocument - Tipi rigenerati: " . $param_types);
+            }
+            
+            // Verifica che il numero di placeholder corrisponda al numero di parametri
+            $placeholder_count = substr_count($query, '?');
+            if ($placeholder_count !== count($param_values)) {
+                error_log("ERRORE CRITICO updateDocument - Il numero di placeholder nella query (" . $placeholder_count . 
+                          ") non corrisponde al numero di valori (" . count($param_values) . ")");
+                          
+                // Mostrazione di maggiori dettagli per il debug
+                error_log("Query completa: " . $query);
+                error_log("Campi con parametri: " . implode(", ", $param_fields));
+                error_log("Campi con valori diretti: " . implode(", ", $direct_fields));
+                          
+                throw new Exception("Errore nella costruzione della query: numero di placeholder non corrispondente");
+            }
+            
+            // Prepara la query
+            $stmt = $conn->prepare($query);
+            if (!$stmt) {
+                throw new Exception("Errore nella preparazione query: " . $conn->error);
+            }
+            
+            // Bindare i parametri dinamicamente
+            $bind_params = array($param_types);
+            
+            foreach ($param_values as $key => $value) {
+                $bind_params[] = &$param_values[$key];
+            }
+            
+            call_user_func_array(array($stmt, 'bind_param'), $bind_params);
+            
+            if (!$stmt->execute()) {
+                throw new Exception("Errore nell'esecuzione della query: " . $stmt->error);
+            }
+            
+            $stmt->close();
+            
+            return true;
+            
+        } catch (Exception $e) {
+            error_log("Errore nell'aggiornamento del documento: " . $e->getMessage());
+            return false;
+        }
+    }
+}
+?>

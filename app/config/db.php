@@ -6,7 +6,7 @@ $db_pass = "G@b@2808";         // Replace with your actual database password
 $db_name = "myodnit_digitalmente";
 
 error_reporting(E_ALL ^ E_NOTICE);
-ini_set("display_errors", 0);
+ini_set("display_errors", 1);
 
 // Create connection
 $conn = new mysqli($db_host, $db_user, $db_pass, $db_name);

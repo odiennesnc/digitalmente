@@ -1,6 +1,7 @@
 <?php
 require_once 'config/db.php';
 require_once 'includes/functions.php';
+require_once 'includes/document_manager.php';
 
 // Start the session
 if (session_status() === PHP_SESSION_NONE) {
@@ -12,20 +13,41 @@ if (!isset($_SESSION['user_id'])) {
     redirect('login.php');
 }
 
-// Get latest documents
-$stmt = $conn->prepare("SELECT d.id, d.titolo, d.tipologia_doc, d.autore, d.editore, a.argomento 
-                      FROM documenti d 
-                      LEFT JOIN argomenti a ON d.argomenti_id = a.id 
-                      ORDER BY d.data_inserimento DESC LIMIT 5");
-$stmt->execute();
-$latest_docs = $stmt->get_result();
+// Get latest documents (20 as requested in scheda_progetto.md)
+// Utilizzo la funzione per ottenere i documenti con i dettagli dalla nuova struttura del database
+try {
+    $latest_docs_array = getAllDocumentsWithDetails($conn);
+    if (!is_array($latest_docs_array)) {
+        error_log("Error retrieving documents: Invalid return type from getAllDocumentsWithDetails");
+        $latest_docs_array = [];
+    }
+    // Limitiamo ai primi 20 documenti
+    $latest_docs_array = array_slice($latest_docs_array, 0, 20);
+} catch (Exception $e) {
+    error_log("Exception in getAllDocumentsWithDetails: " . $e->getMessage());
+    $latest_docs_array = [];
+}
+
+// Per versioni di PHP più vecchie, usiamo un approccio più compatibile
+// invece della classe anonima
+$latest_docs = new stdClass();
+$latest_docs->num_rows = count($latest_docs_array);
+$latest_docs->data = $latest_docs_array;
+$latest_docs->position = 0;
+
+// Nota: la funzione custom_fetch_assoc è definita in functions.php
 
 // Get todo items for the current user
 $user_id = $_SESSION['user_id'];
 $stmt = $conn->prepare("SELECT * FROM todo WHERE utente_id = ? AND completato = 0 ORDER BY data_scadenza ASC LIMIT 5");
-$stmt->bind_param("i", $user_id);
-$stmt->execute();
-$todos = $stmt->get_result();
+if ($stmt === false) {
+    error_log("Error preparing todo statement: " . $conn->error);
+    $todos = null; // Set a default value that can be checked later
+} else {
+    $stmt->bind_param("i", $user_id);
+    $stmt->execute();
+    $todos = $stmt->get_result();
+}
 
 include 'includes/header.php';
 ?>
@@ -46,10 +68,15 @@ include 'includes/header.php';
         </div>
         <div>
             <?php
-            $stmt = $conn->prepare("SELECT COUNT(*) as total FROM documenti");
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $count = $result->fetch_assoc()['total'];
+            $stmt = $conn->prepare("SELECT COUNT(*) as total FROM documenti_base");
+            if ($stmt === false) {
+                error_log("Error preparing statement: " . $conn->error);
+                $count = "N/A"; // Default value if query fails
+            } else {
+                $stmt->execute();
+                $result = $stmt->get_result();
+                $count = $result->fetch_assoc()['total'];
+            }
             ?>
             <p class="mb-2 text-sm font-medium text-gray-600 dark:text-gray-400">
                 Documenti Totali
@@ -69,9 +96,14 @@ include 'includes/header.php';
         <div>
             <?php
             $stmt = $conn->prepare("SELECT COUNT(*) as total FROM argomenti");
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $count = $result->fetch_assoc()['total'];
+            if ($stmt === false) {
+                error_log("Error preparing statement for argomenti count: " . $conn->error);
+                $count = "N/A"; // Default value if query fails
+            } else {
+                $stmt->execute();
+                $result = $stmt->get_result();
+                $count = $result->fetch_assoc()['total'];
+            }
             ?>
             <p class="mb-2 text-sm font-medium text-gray-600 dark:text-gray-400">
                 Argomenti
@@ -91,10 +123,15 @@ include 'includes/header.php';
         <div>
             <?php
             $stmt = $conn->prepare("SELECT COUNT(*) as total FROM todo WHERE utente_id = ? AND completato = 0");
-            $stmt->bind_param("i", $user_id);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $count = $result->fetch_assoc()['total'];
+            if ($stmt === false) {
+                error_log("Error preparing statement for todo count: " . $conn->error);
+                $count = "N/A"; // Default value if query fails
+            } else {
+                $stmt->bind_param("i", $user_id);
+                $stmt->execute();
+                $result = $stmt->get_result();
+                $count = $result->fetch_assoc()['total'];
+            }
             ?>
             <p class="mb-2 text-sm font-medium text-gray-600 dark:text-gray-400">
                 Todo Attivi
@@ -114,9 +151,14 @@ include 'includes/header.php';
         <div>
             <?php
             $stmt = $conn->prepare("SELECT COUNT(*) as total FROM utenti");
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $count = $result->fetch_assoc()['total'];
+            if ($stmt === false) {
+                error_log("Error preparing statement for utenti count: " . $conn->error);
+                $count = "N/A"; // Default value if query fails
+            } else {
+                $stmt->execute();
+                $result = $stmt->get_result();
+                $count = $result->fetch_assoc()['total'];
+            }
             ?>
             <p class="mb-2 text-sm font-medium text-gray-600 dark:text-gray-400">
                 Utenti
@@ -128,44 +170,74 @@ include 'includes/header.php';
     </div>
 </div>
 
-<!-- Latest documents and Todo section -->
-<div class="grid gap-6 mb-8 md:grid-cols-2">
-    <!-- Latest Documents -->
+<!-- Latest Documents Section -->
+<div class="w-full mb-8">
     <div class="min-w-0 p-4 bg-white rounded-lg shadow-xs dark:bg-gray-800">
-        <h4 class="mb-4 font-semibold text-gray-800 dark:text-gray-300">
-            Ultimi documenti inseriti
-        </h4>
-        <div class="overflow-x-auto">
-            <table class="w-full whitespace-no-wrap">
+        <div class="flex items-center justify-between mb-4">
+            <h4 class="font-semibold text-gray-800 dark:text-gray-300">
+                Ultimi 20 documenti inseriti
+            </h4>
+            <a href="documenti/index.php" class="px-4 py-2 text-sm font-medium text-white transition-colors duration-150 bg-purple-600 border border-transparent rounded-lg active:bg-purple-600 hover:bg-purple-700 focus:outline-none focus:shadow-outline-purple">
+                Vedi tutti
+            </a>
+        </div>
+        <div class="w-full overflow-x-auto">
+            <table id="latestDocsTable" class="w-full whitespace-no-wrap">
                 <thead>
                     <tr class="text-xs font-semibold tracking-wide text-left text-gray-500 uppercase border-b dark:border-gray-700 bg-gray-50 dark:text-gray-400 dark:bg-gray-800">
-                        <th class="px-4 py-3">Tipo</th>
                         <th class="px-4 py-3">Titolo</th>
-                        <th class="px-4 py-3">Autore</th>
+                        <th class="px-4 py-3">Tipologia</th>
+                        <th class="px-4 py-3">Autore/Editore</th>
+                        <th class="px-4 py-3">Anno</th>
                         <th class="px-4 py-3">Argomento</th>
+                        <th class="px-4 py-3">Data Ins.</th>
+                        <th class="px-4 py-3">Azioni</th>
                     </tr>
                 </thead>
                 <tbody class="bg-white divide-y dark:divide-gray-700 dark:bg-gray-800">
-                    <?php if ($latest_docs->num_rows > 0) : ?>
-                        <?php while ($doc = $latest_docs->fetch_assoc()) : ?>
+                    <?php if (isset($latest_docs) && isset($latest_docs->num_rows) && $latest_docs->num_rows > 0) : ?>
+                        <?php while ($doc = custom_fetch_assoc($latest_docs)) : ?>
                             <tr class="text-gray-700 dark:text-gray-400">
-                                <td class="px-4 py-3 text-sm">
-                                    <?php echo getDocumentTypeName($doc['tipologia_doc']); ?>
-                                </td>
                                 <td class="px-4 py-3 text-sm">
                                     <?php echo htmlspecialchars($doc['titolo']); ?>
                                 </td>
                                 <td class="px-4 py-3 text-sm">
-                                    <?php echo htmlspecialchars($doc['autore']); ?>
+                                    <?php echo getDocumentTypeName($doc['tipologia_doc']); ?>
                                 </td>
                                 <td class="px-4 py-3 text-sm">
-                                    <?php echo htmlspecialchars($doc['argomento']); ?>
+                                    <?php 
+                                        if ($doc['tipologia_doc'] == 1 || $doc['tipologia_doc'] == 3) { // Libro o Video
+                                            echo htmlspecialchars(isset($doc['autore']) && $doc['autore'] ? $doc['autore'] : 'N/D');
+                                        } else { // Rivista
+                                            echo htmlspecialchars(isset($doc['editore']) && $doc['editore'] ? $doc['editore'] : 'N/D');
+                                        }
+                                    ?>
+                                </td>
+                                <td class="px-4 py-3 text-sm">
+                                    <?php echo htmlspecialchars(isset($doc['anno_pubblicazione']) && $doc['anno_pubblicazione'] ? $doc['anno_pubblicazione'] : 'N/D'); ?>
+                                </td>
+                                <td class="px-4 py-3 text-sm">
+                                    <?php echo htmlspecialchars(isset($doc['argomento']) && $doc['argomento'] ? $doc['argomento'] : 'Non specificato'); ?>
+                                </td>
+                                <td class="px-4 py-3 text-sm">
+                                    <?php echo date('d/m/Y', strtotime($doc['data_inserimento'])); ?>
+                                </td>
+                                <td class="px-4 py-3 text-sm">
+                                    <div class="flex items-center space-x-2">
+                                        <a href="documenti/modifica.php?id=<?php echo $doc['id']; ?>" 
+                                           class="flex items-center justify-between px-1 py-1 text-sm font-medium leading-5 text-purple-600 rounded-lg dark:text-gray-400 focus:outline-none focus:shadow-outline-gray" 
+                                           aria-label="Modifica">
+                                            <svg class="w-5 h-5" aria-hidden="true" fill="currentColor" viewBox="0 0 20 20">
+                                                <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"></path>
+                                            </svg>
+                                        </a>
+                                    </div>
                                 </td>
                             </tr>
                         <?php endwhile; ?>
                     <?php else : ?>
                         <tr class="text-gray-700 dark:text-gray-400">
-                            <td colspan="4" class="px-4 py-3 text-sm text-center">
+                            <td colspan="7" class="px-4 py-3 text-sm text-center">
                                 Nessun documento trovato
                             </td>
                         </tr>
@@ -173,15 +245,11 @@ include 'includes/header.php';
                 </tbody>
             </table>
         </div>
-        <div class="mt-4 text-right">
-            <a href="documenti/index.php" class="px-4 py-2 text-sm text-white bg-purple-600 rounded-lg">
-                Vedi tutti
-            </a>
-        </div>
     </div>
-    
-    <!-- Todo List -->
-    <div class="min-w-0 p-4 bg-white rounded-lg shadow-xs dark:bg-gray-800">
+</div>
+
+<!-- Todo List -->
+<div class="min-w-0 p-4 bg-white rounded-lg shadow-xs dark:bg-gray-800">
         <h4 class="mb-4 font-semibold text-gray-800 dark:text-gray-300">
             Todo List
         </h4>
@@ -195,7 +263,7 @@ include 'includes/header.php';
                     </tr>
                 </thead>
                 <tbody class="bg-white divide-y dark:divide-gray-700 dark:bg-gray-800">
-                    <?php if ($todos->num_rows > 0) : ?>
+                    <?php if ($todos !== null && $todos->num_rows > 0) : ?>
                         <?php while ($todo = $todos->fetch_assoc()) : ?>
                             <tr class="text-gray-700 dark:text-gray-400">
                                 <td class="px-4 py-3 text-sm">
@@ -234,5 +302,23 @@ include 'includes/header.php';
         </div>
     </div>
 </div>
+
+<!-- Script per DataTables -->
+<script>
+$(document).ready(function() {
+    // Inizializza DataTable per la tabella dei documenti recenti
+    $('#latestDocsTable').DataTable({
+        "language": {
+            "url": "//cdn.datatables.net/plug-ins/1.10.25/i18n/Italian.json"
+        },
+        "responsive": true,
+        "pageLength": 10,
+        "order": [[5, 'desc']], // Ordina per data inserimento (decrescente)
+        "columnDefs": [
+            { "orderable": false, "targets": 6 } // Disabilita ordinamento per colonna azioni
+        ]
+    });
+});
+</script>
 
 <?php include 'includes/footer.php'; ?>

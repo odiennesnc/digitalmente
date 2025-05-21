@@ -9,33 +9,6 @@ CREATE TABLE IF NOT EXISTS `argomenti` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Table structure for documenti (documents)
-CREATE TABLE IF NOT EXISTS `documenti` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `argomenti_id` int(11) DEFAULT NULL,
-  `autore` varchar(250) DEFAULT NULL,
-  `titolo` varchar(250) DEFAULT NULL,
-  `collana` varchar(250) DEFAULT NULL,
-  `traduzione` varchar(250) DEFAULT NULL,
-  `editore` varchar(250) DEFAULT NULL,
-  `anno_pubblicazione` varchar(50) DEFAULT NULL,
-  `pagine` varchar(50) DEFAULT NULL,
-  `tipologia_doc` int(11) DEFAULT NULL COMMENT '1=libro, 2=rivista, 3=video',
-  `indice` text DEFAULT NULL,
-  `bibliografia` text DEFAULT NULL,
-  `mese` varchar(50) DEFAULT NULL,
-  `numero` varchar(50) DEFAULT NULL,
-  `sommario` text DEFAULT NULL,
-  `regia` varchar(250) DEFAULT NULL,
-  `montaggio` varchar(250) DEFAULT NULL,
-  `argomento_trattato` varchar(250) DEFAULT NULL,
-  `foto` varchar(250) DEFAULT NULL,
-  `data_inserimento` datetime DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `argomenti_id` (`argomenti_id`),
-  CONSTRAINT `documenti_ibfk_1` FOREIGN KEY (`argomenti_id`) REFERENCES `argomenti` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 -- Table structure for utenti (users)
 CREATE TABLE IF NOT EXISTS `utenti` (
   `id` int(11) NOT NULL AUTO_INCREMENT,

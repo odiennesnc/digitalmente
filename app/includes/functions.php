@@ -100,23 +100,10 @@ function uploadFile($file, $destination) {
     }
 }
 
-/**
- * Get document type name
- * @param int $typology
- * @return string
+/* 
+ * Function getDocumentTypeName moved to document_utils.php
+ * to avoid duplicate function declaration errors
  */
-function getDocumentTypeName($typology) {
-    switch ($typology) {
-        case 1:
-            return 'Libro';
-        case 2:
-            return 'Rivista';
-        case 3:
-            return 'Video';
-        default:
-            return 'Sconosciuto';
-    }
-}
 
 /**
  * Get user role name
@@ -202,5 +189,24 @@ function formatDateForDB($date) {
     // Se arriva qui, la data non è in un formato riconosciuto
     error_log("Data non valida: $date");
     return null;
+}
+
+/**
+ * Custom function to emulate fetch_assoc for our custom result object
+ * Used for backwards compatibility with older PHP versions
+ * 
+ * @param object $result Custom result object
+ * @return array|null Row data or null if no more rows
+ */
+if (!function_exists('custom_fetch_assoc')) {
+    function custom_fetch_assoc($result) {
+        if ($result->position >= count($result->data)) {
+            return null;
+        }
+        
+        $row = $result->data[$result->position];
+        $result->position++;
+        return $row;
+    }
 }
 ?>

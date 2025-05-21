@@ -49,6 +49,13 @@ window.data = function() {
         closeProfileMenu() {
             this.isProfileMenuOpen = false;
         },
+        isAdminMenuOpen: false,
+        toggleAdminMenu() {
+            this.isAdminMenuOpen = !this.isAdminMenuOpen;
+        },
+        closeAdminMenu() {
+            this.isAdminMenuOpen = false;
+        },
         isPagesMenuOpen: false,
         togglePagesMenu() {
             this.isPagesMenuOpen = !this.isPagesMenuOpen;
